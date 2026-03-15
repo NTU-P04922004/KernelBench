@@ -187,8 +187,11 @@ def query_server(
             if "openai/" not in model_name.lower() and "gpt" not in model_name.lower():
                 completion_kwargs["top_k"] = top_k
         
+        completion_kwargs["api_key"] = "v1.CmQKHHN0YXRpY2tleS1lMDBjeXZzaDg0N25xanJ3amYSIXNlcnZpY2VhY2NvdW50LWUwMGVodjgzZnBwZWN2ZHB4YzIMCN6ous0GEMG36_sCOgwI3avSmAcQwPORowNAAloDZTAw.AAAAAAAAAAFVMZ25XASMKheRGVazE6qJF_-KNxgoQwX1acuPISSSAOTJg-A5vJrlJ3pBsBwBGXZUA1C4_NawAcqhGbnR5B8O"
+        completion_kwargs["api_base"] = "https://api.tokenfactory.nebius.com/v1"
+        completion_kwargs["model_name"] = "openai/openai/gpt-oss-120b"
         response = completion(**completion_kwargs)
-        
+       
         # output processing
         if num_completions == 1:
             content = response.choices[0].message.content

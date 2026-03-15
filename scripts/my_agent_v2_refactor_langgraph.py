@@ -12,10 +12,11 @@ from kernelbench.prompt_constructor_toml import (
 )
 from kernelbench.utils import (
     create_inference_server_from_presets,
-    extract_first_code,
-    query_server,
+    # query_server,
 )
 from pydra import REQUIRED, Config
+from agent_workflow import build_workflow
+from eval_func import app, EvalFunc
 
 """
 Generate and evaluate a single sample
@@ -140,6 +141,7 @@ class EvalFunc:
             timing_method=timing_method,
             num_correct_trials=5, num_perf_trials=100, backend=backend, precision=get_torch_dtype_from_string(precision)
         )
+
 
 @pydra.main(base=EvalConfig)
 def main(config: EvalConfig):
@@ -275,53 +277,35 @@ def main(config: EvalConfig):
         with open(os.path.join(config.logdir, f"prompt_level_{config.level}_problem_{config.problem_id}.txt"), "w") as f:
             f.write(custom_prompt)
 
-    # Query server with constructed prompt
-    custom_kernel = inference_server(custom_prompt)
-    custom_kernel = extract_first_code(custom_kernel, ["python", "cpp"])
+    def eval_callback(ref_arch_src, custom_kernel, config):
+        with app.run():
+            evaluator_cls = EvalFunc.with_options(gpu=config.gpu)
+            return evaluator_cls().eval_single_sample_modal.remote(
+                ref_arch_src,
+                custom_kernel,
+                config.verbose,
+                gpu_arch_mapping[config.gpu],
+                config.backend,
+                config.precision,
+                config.timing_method,
+            )
 
-    # check LLM is able to generate custom kernel code
-    assert (
-        custom_kernel is not None
-    ), f"Custom {config.backend} kernel code generation failed"
+    app_runnable = build_workflow()
 
-    # Optional: static code checker for kernel code using regex matching
-    # NOTE: by no means is this checker complete, but it could help catch some potential hacks
-    if config.check_kernel:
-        from kernelbench.kernel_static_checker import validate_kernel_static
-        static_check_status, errors, warnings = validate_kernel_static(
-            custom_kernel,
-            backend=config.backend,
-            precision=config.precision,
+    samples = 1
+    for i in range(samples):
+        result = app_runnable.invoke(
+            {
+                "config": config,
+                "problem_id": config.problem_id,
+                "problem_name": problem_name,
+                "ref_arch_src": ref_arch_src,
+                "custom_prompt": custom_prompt,
+                "inference_server": inference_server,
+                "eval_callback": eval_callback,
+            }
         )
-        assert static_check_status, f"Static check failed for level {config.level} problem {config.problem_id}. Errors: {errors}. Warnings: {warnings}"
-        if warnings:
-            print(f"Static check warnings for level {config.level} problem {config.problem_id}: {warnings}")
-
-    # this should be optional
-    if config.log:
-        with open(os.path.join(config.logdir, f"generated_kernel_level_{config.level}_problem_{config.problem_id}.py"), "w") as f:
-            f.write(custom_kernel)
-
-    with app.run():
-        evaluator_cls = EvalFunc.with_options(gpu=config.gpu)
-        kernel_exec_result = evaluator_cls().eval_single_sample_modal.remote(
-            ref_arch_src,
-            custom_kernel,
-            config.verbose,
-            gpu_arch_mapping[config.gpu],
-            config.backend,
-            config.precision,
-            config.timing_method,
-        )
-
-        print(
-            f"Evaluation result for level {config.level} problem {config.problem_id}:\n{kernel_exec_result}"
-        )
-
-    if config.log:
-        with open(os.path.join(config.logdir, f"eval_result_level_{config.level}_problem_{config.problem_id}.txt"), "a") as f:
-            f.write(f"Problem Name: {problem_name}\n")
-            f.write(str(kernel_exec_result))
+        print(type(result), result)
 
 
 if __name__ == "__main__":

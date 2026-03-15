@@ -1,9 +1,6 @@
-import json
 import os
-import sys
 from datetime import datetime
 
-import modal
 import pydra
 from kernelbench.dataset import construct_kernelbench_dataset
 from kernelbench.prompt_constructor_toml import (
@@ -12,10 +9,11 @@ from kernelbench.prompt_constructor_toml import (
 )
 from kernelbench.utils import (
     create_inference_server_from_presets,
-    extract_first_code,
-    query_server,
+    # query_server,
 )
 from pydra import REQUIRED, Config
+from agent_workflow import build_workflow
+from eval_func import app, EvalFunc
 
 """
 Generate and evaluate a single sample
@@ -26,9 +24,6 @@ uv run python scripts/generate_and_eval_single_sample_modal.py dataset_src=huggi
 """
 
 REPO_TOP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REMOTE_REPO_TOP_DIR = "/home/dapumptu2/KernelBench_remote"
-
-app = modal.App("eval_single_sample")
 gpu_arch_mapping = {"L40S": ["Ada"], "H100": ["Hopper"], "A100": ["Ampere"], "L4": ["Ada"], "T4": ["Turing"], "A10G": ["Ampere"]}
 
 class EvalConfig(Config):
@@ -95,51 +90,20 @@ class EvalConfig(Config):
     def __repr__(self):
         return f"EvalConfig({self.to_dict()})"
 
-cuda_version = "13.0.0"  # should be no greater than host CUDA version
-flavor = "devel"  #  includes full CUDA toolkit
-operating_sys = "ubuntu22.04"
-tag = f"{cuda_version}-{flavor}-{operating_sys}"
 
-SRC_DIR = os.path.join(REMOTE_REPO_TOP_DIR, "src")
-
-image = (
-    modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.10")
-    .apt_install(
-        "git",
-        "gcc-10",
-        "g++-10",
-        "clang",  # note i skip a step
-    )
-    .uv_sync(uv_project_dir=REMOTE_REPO_TOP_DIR, extras=["gpu"])
-    .env({"PYTHONPATH": "/root:/root/src"})
-    .add_local_dir(SRC_DIR, remote_path="/root/src")  # must be last
-)
-
-@app.cls(image=image)
-class EvalFunc:
-
-    @modal.method()
-    def eval_single_sample_modal(self, ref_arch_src, custom_kernel, verbose, gpu_arch, backend, precision, timing_method):
-        # 3. Evaluate Kernel
-        # NOTE: no need to wrap around process here as only a single sample
-        # see batch eval for examples of process isolation
-        import torch
-        torch.set_printoptions(precision=4, threshold=10)
-
-        from kernelbench.eval import (
-            eval_kernel_against_ref,
-            get_torch_dtype_from_string,
+def eval_callback(ref_arch_src, custom_kernel, config):
+    with app.run():
+        evaluator_cls = EvalFunc.with_options(gpu=config.gpu)
+        return evaluator_cls().eval_single_sample_modal.remote(
+            ref_arch_src,
+            custom_kernel,
+            config.verbose,
+            gpu_arch_mapping[config.gpu],
+            config.backend,
+            config.precision,
+            config.timing_method,
         )
 
-        # Use utility function to set the GPU architecture in the modal environment
-        from kernelbench.utils import set_gpu_arch as modal_set_gpu_arch
-
-        modal_set_gpu_arch(gpu_arch)
-        return eval_kernel_against_ref(
-            ref_arch_src, custom_kernel, verbose=verbose, measure_performance=True, 
-            timing_method=timing_method,
-            num_correct_trials=5, num_perf_trials=100, backend=backend, precision=get_torch_dtype_from_string(precision)
-        )
 
 @pydra.main(base=EvalConfig)
 def main(config: EvalConfig):
@@ -275,53 +239,22 @@ def main(config: EvalConfig):
         with open(os.path.join(config.logdir, f"prompt_level_{config.level}_problem_{config.problem_id}.txt"), "w") as f:
             f.write(custom_prompt)
 
-    # Query server with constructed prompt
-    custom_kernel = inference_server(custom_prompt)
-    custom_kernel = extract_first_code(custom_kernel, ["python", "cpp"])
+    app_runnable = build_workflow()
 
-    # check LLM is able to generate custom kernel code
-    assert (
-        custom_kernel is not None
-    ), f"Custom {config.backend} kernel code generation failed"
-
-    # Optional: static code checker for kernel code using regex matching
-    # NOTE: by no means is this checker complete, but it could help catch some potential hacks
-    if config.check_kernel:
-        from kernelbench.kernel_static_checker import validate_kernel_static
-        static_check_status, errors, warnings = validate_kernel_static(
-            custom_kernel,
-            backend=config.backend,
-            precision=config.precision,
+    samples = 1
+    for i in range(samples):
+        result = app_runnable.invoke(
+            {
+                "config": config,
+                "problem_id": config.problem_id,
+                "problem_name": problem_name,
+                "ref_arch_src": ref_arch_src,
+                "custom_prompt": custom_prompt,
+                "inference_server": inference_server,
+                "eval_callback": eval_callback,
+            }
         )
-        assert static_check_status, f"Static check failed for level {config.level} problem {config.problem_id}. Errors: {errors}. Warnings: {warnings}"
-        if warnings:
-            print(f"Static check warnings for level {config.level} problem {config.problem_id}: {warnings}")
-
-    # this should be optional
-    if config.log:
-        with open(os.path.join(config.logdir, f"generated_kernel_level_{config.level}_problem_{config.problem_id}.py"), "w") as f:
-            f.write(custom_kernel)
-
-    with app.run():
-        evaluator_cls = EvalFunc.with_options(gpu=config.gpu)
-        kernel_exec_result = evaluator_cls().eval_single_sample_modal.remote(
-            ref_arch_src,
-            custom_kernel,
-            config.verbose,
-            gpu_arch_mapping[config.gpu],
-            config.backend,
-            config.precision,
-            config.timing_method,
-        )
-
-        print(
-            f"Evaluation result for level {config.level} problem {config.problem_id}:\n{kernel_exec_result}"
-        )
-
-    if config.log:
-        with open(os.path.join(config.logdir, f"eval_result_level_{config.level}_problem_{config.problem_id}.txt"), "a") as f:
-            f.write(f"Problem Name: {problem_name}\n")
-            f.write(str(kernel_exec_result))
+        # print(type(result), result)
 
 
 if __name__ == "__main__":
