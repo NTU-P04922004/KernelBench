@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
+
 import modal
 
-REMOTE_REPO_TOP_DIR = "/home/dapumptu2/KernelBench_remote"
+# .resolve() gets the absolute path. .parents[1] goes up exactly two directory levels.
+repo_top_dir = Path(__file__).resolve().parents[1]
+REMOTE_REPO_TOP_DIR = str(repo_top_dir.parent / "KernelBench_remote")
 
 app = modal.App("eval_single_sample")
 
@@ -46,7 +50,13 @@ class EvalFunc:
 
         modal_set_gpu_arch(gpu_arch)
         return eval_kernel_against_ref(
-            ref_arch_src, custom_kernel, verbose=verbose, measure_performance=True, 
+            ref_arch_src,
+            custom_kernel,
+            verbose=verbose,
+            measure_performance=True,
             timing_method=timing_method,
-            num_correct_trials=5, num_perf_trials=100, backend=backend, precision=get_torch_dtype_from_string(precision)
+            num_correct_trials=5,
+            num_perf_trials=100,
+            backend=backend,
+            precision=get_torch_dtype_from_string(precision),
         )

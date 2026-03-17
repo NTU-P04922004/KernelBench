@@ -97,6 +97,8 @@ def query_server(
     server_address: str = "localhost",
     server_type: str = "sglang",
     model_name: str = "default",  # specify model type
+    api_key: str = "",
+    api_base: str = "",
 
     # for reasoning models
     is_reasoning_model: bool = False, # indiactor of using reasoning models
@@ -110,24 +112,28 @@ def query_server(
     """
     # Local Server (SGLang, vLLM, Tokasaurus) - special handling
     if server_type == "local":
-        url = f"http://{server_address}:{server_port}"
+        # url = f"http://{server_address}:{server_port}"
         client = OpenAI(
-            api_key=SGLANG_KEY, base_url=f"{url}/v1", timeout=None, max_retries=0
+            api_key=api_key, base_url=api_base, timeout=None, max_retries=0
         )
-        if isinstance(prompt, str):
-            response = client.completions.create(
-                model="default",
-                prompt=prompt,
-                temperature=temperature,
-                n=num_completions,
-                max_tokens=max_tokens,
-                top_p=top_p,
-            )
-            outputs = [choice.text for choice in response.choices]
-        else:
+        # if isinstance(prompt, str):
+        #     response = client.completions.create(
+        #         model=model_name,
+        #         prompt=prompt,
+        #         temperature=temperature,
+        #         n=num_completions,
+        #         max_tokens=max_tokens,
+        #         top_p=top_p,
+        #     )
+        #     outputs = [choice.text for choice in response.choices]
+        # else:
+        if True:
+            messages = [
+                {"role": "user", "content": prompt}
+            ]
             response = client.chat.completions.create(
-                model="default",
-                messages=prompt,
+                model=model_name,
+                messages=messages,
                 temperature=temperature,
                 n=num_completions,
                 max_tokens=max_tokens,
@@ -187,9 +193,6 @@ def query_server(
             if "openai/" not in model_name.lower() and "gpt" not in model_name.lower():
                 completion_kwargs["top_k"] = top_k
         
-        completion_kwargs["api_key"] = "v1.CmQKHHN0YXRpY2tleS1lMDBjeXZzaDg0N25xanJ3amYSIXNlcnZpY2VhY2NvdW50LWUwMGVodjgzZnBwZWN2ZHB4YzIMCN6ous0GEMG36_sCOgwI3avSmAcQwPORowNAAloDZTAw.AAAAAAAAAAFVMZ25XASMKheRGVazE6qJF_-KNxgoQwX1acuPISSSAOTJg-A5vJrlJ3pBsBwBGXZUA1C4_NawAcqhGbnR5B8O"
-        completion_kwargs["api_base"] = "https://api.tokenfactory.nebius.com/v1"
-        completion_kwargs["model_name"] = "openai/openai/gpt-oss-120b"
         response = completion(**completion_kwargs)
        
         # output processing

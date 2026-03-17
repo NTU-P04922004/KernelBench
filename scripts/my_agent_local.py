@@ -3,19 +3,24 @@ import time
 from datetime import datetime
 
 import pydra
+import torch
 from kernelbench.dataset import construct_kernelbench_dataset
+from kernelbench.eval import (
+    eval_kernel_against_ref,
+    get_torch_dtype_from_string,
+)
 from kernelbench.prompt_constructor_toml import (
     get_custom_prompt,
     get_prompt_for_backend,
 )
 from kernelbench.utils import (
     create_inference_server_from_presets,
+    set_gpu_arch,
     # query_server,
 )
 from pydra import REQUIRED, Config
 
 from agent_workflow import build_workflow
-from eval_func import EvalFunc, app
 """
 Generate and evaluate a single sample
 Easiest way to get started, to test a single problem for experimentation or debugging
@@ -23,6 +28,8 @@ Easiest way to get started, to test a single problem for experimentation or debu
 Example Usage:
 uv run python scripts/generate_and_eval_single_sample_modal.py dataset_src=huggingface level=1 problem_id=1 eval_mode=modal gpu=L40S server_type=gemini model_name=gemini-2.5-flash max_tokens=4096 temperature=0.0
 """
+
+torch.set_printoptions(precision=4, threshold=10)
 
 REPO_TOP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 gpu_arch_mapping = {"L40S": ["Ada"], "H100": ["Hopper"], "A100": ["Ampere"], "L4": ["Ada"], "T4": ["Turing"], "A10G": ["Ampere"]}
@@ -94,17 +101,18 @@ class EvalConfig(Config):
 
 
 def eval_callback(ref_arch_src, custom_kernel, config):
-    with app.run():
-        evaluator_cls = EvalFunc.with_options(gpu=config.gpu)
-        return evaluator_cls().eval_single_sample_modal.remote(
-            ref_arch_src,
-            custom_kernel,
-            config.verbose,
-            gpu_arch_mapping[config.gpu],
-            config.backend,
-            config.precision,
-            config.timing_method,
-        )
+    set_gpu_arch(gpu_arch_mapping[config.gpu])
+    return eval_kernel_against_ref(
+        ref_arch_src,
+        custom_kernel,
+        verbose=config.verbose,
+        measure_performance=True,
+        timing_method=config.timing_method,
+        num_correct_trials=5,
+        num_perf_trials=100,
+        backend=config.backend,
+        precision=get_torch_dtype_from_string(config.precision),
+    )
 
 
 @pydra.main(base=EvalConfig)
