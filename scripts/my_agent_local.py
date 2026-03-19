@@ -100,18 +100,18 @@ class EvalConfig(Config):
         return f"EvalConfig({self.to_dict()})"
 
 
-def eval_callback(ref_arch_src, custom_kernel, config):
-    set_gpu_arch(gpu_arch_mapping[config.gpu])
+def eval_callback(ref_arch_src, custom_kernel, gpu, verbose, timing_method, backend, precision):
+    set_gpu_arch(gpu_arch_mapping[gpu])
     return eval_kernel_against_ref(
         ref_arch_src,
         custom_kernel,
-        verbose=config.verbose,
+        verbose=verbose,
         measure_performance=True,
-        timing_method=config.timing_method,
+        timing_method=timing_method,
         num_correct_trials=5,
         num_perf_trials=100,
-        backend=config.backend,
-        precision=get_torch_dtype_from_string(config.precision),
+        backend=backend,
+        precision=get_torch_dtype_from_string(precision),
     )
 
 
@@ -156,9 +156,6 @@ def main(config: EvalConfig):
     # Problem Checks
     num_problems = len(dataset)
     print(f"Number of problems in Level {config.level}: {num_problems}")
-    print(
-        f"Start Generation + Evaluation for Level {config.level} Problem {config.problem_id}"
-    )
 
     # 2. Generate Sample
     # Create inference function with config parameters
@@ -223,55 +220,69 @@ def main(config: EvalConfig):
             )
 
     # kuohsin: Add a for loop to run more problems
-
-    # Fetch problem - unified interface, no branching needed
-    problem = dataset.get_problem_by_id(config.problem_id)
-    ref_arch_src = problem.code
-    problem_name = problem.name
+    all_problem_ids = dataset.get_problem_ids()
+    all_problem_ids.sort()
+    for _, problem_id in enumerate(all_problem_ids[:2]):
+        print(
+            f"Start Generation + Evaluation for Level {config.level} Problem {problem_id}"
+        )
+        
+        # Fetch problem - unified interface, no branching needed
+        problem = dataset.get_problem_by_id(problem_id)
+        ref_arch_src = problem.code
+        problem_name = problem.name
+        
+        if custom_prompt_key:
+            custom_prompt = get_custom_prompt(
+                custom_prompt_key,
+                ref_arch_src=ref_arch_src,
+                backend=backend,
+                option=prompt_option,
+                precision=config.precision,
+                include_hardware=include_hardware,
+                gpu_name=config.hardware_gpu_name,
+            )
+        else:
+            custom_prompt = get_prompt_for_backend(
+                ref_arch_src,
+                backend,
+                option=prompt_option,
+                precision=config.precision,
+                include_hardware=include_hardware,
+                gpu_name=config.hardware_gpu_name,
+            )
     
-    if custom_prompt_key:
-        custom_prompt = get_custom_prompt(
-            custom_prompt_key,
-            ref_arch_src=ref_arch_src,
-            backend=backend,
-            option=prompt_option,
-            precision=config.precision,
-            include_hardware=include_hardware,
-            gpu_name=config.hardware_gpu_name,
-        )
-    else:
-        custom_prompt = get_prompt_for_backend(
-            ref_arch_src,
-            backend,
-            option=prompt_option,
-            precision=config.precision,
-            include_hardware=include_hardware,
-            gpu_name=config.hardware_gpu_name,
-        )
-
-    if config.log_prompt:
-        with open(os.path.join(config.logdir, f"prompt_level_{config.level}_problem_{config.problem_id}.txt"), "w") as f:
-            f.write(custom_prompt)
-
-    app_runnable = build_workflow()
-
-    samples = 1
-    for i in range(samples):
-        start_time = time.perf_counter()
-        result = app_runnable.invoke(
-            {
-                "config": config,
-                "problem_id": config.problem_id,
-                "problem_name": problem_name,
-                "ref_arch_src": ref_arch_src,
-                "custom_prompt": custom_prompt,
-                "inference_server": inference_server,
-                "eval_callback": eval_callback,
-            }
-        )
-        end_time = time.perf_counter()
-        print(f"[Timing] Total took {end_time - start_time:.2f} seconds")
-        # print(type(result), result)
+        if config.log_prompt:
+            with open(os.path.join(config.logdir, f"prompt_level_{config.level}_problem_{problem_id}.txt"), "w") as f:
+                f.write(custom_prompt)
+    
+        app_runnable = build_workflow()
+    
+        samples = 1
+        for i in range(samples):
+            start_time = time.perf_counter()
+            result = app_runnable.invoke(
+                {
+                    "level": config.level,
+                    "problem_id": problem_id,
+                    "problem_name": problem_name,
+                    "ref_arch_src": ref_arch_src,
+                    "custom_prompt": custom_prompt,
+                    "check_kernel": config.check_kernel,
+                    "backend": config.backend,
+                    "precision": config.precision,
+                    "gpu": config.gpu,
+                    "timing_method": config.timing_method,
+                    "log": config.log,
+                    "logdir": config.logdir,
+                    "verbose": config.verbose,
+                    "inference_server": inference_server,
+                    "eval_callback": eval_callback,
+                }
+            )
+            end_time = time.perf_counter()
+            print(f"[Timing] Total took {end_time - start_time:.2f} seconds")
+            # print(type(result), result)
 
 
 if __name__ == "__main__":

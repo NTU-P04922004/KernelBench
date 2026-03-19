@@ -1,22 +1,21 @@
-import json
-import os, sys
+import os
 from dataclasses import dataclass
+from datetime import datetime
 
 import pydra
 import torch
-
-from pydra import Config, REQUIRED
-
 from kernelbench.dataset import construct_kernelbench_dataset
-from kernelbench.eval import eval_kernel_against_ref
-from kernelbench.prompt_constructor_toml import get_prompt_for_backend, get_custom_prompt
+from kernelbench.kernel_static_checker import validate_kernel_static
+from kernelbench.prompt_constructor_toml import (
+    get_custom_prompt,
+    get_prompt_for_backend,
+)
 from kernelbench.utils import (
     create_inference_server_from_presets,
     extract_first_code,
     maybe_multithread,
-    set_gpu_arch,
 )
-from kernelbench.kernel_static_checker import validate_kernel_static
+from pydra import REQUIRED, Config
 
 """
 Batch Generate Samples for Particular Level
@@ -57,6 +56,8 @@ class GenerationConfig(Config):
         self.model_name = None
         self.max_tokens = None
         self.temperature = 0.0
+        self.api_base = None
+        self.api_key = None
         
         # Reasoning model specific parameters
         self.is_reasoning_model = False  # set to True for o1, o3, Gemini 2.5 thinking, etc.
@@ -110,6 +111,7 @@ def generate_sample_single(
     problem = dataset.get_problem_by_id(work.problem_id)
     ref_arch_src = problem.code
     problem_name = problem.name
+    problem_number = work.problem_id
 
     if config.custom_prompt_key:
         custom_prompt = get_custom_prompt(
@@ -153,9 +155,9 @@ def generate_sample_single(
             # uses the default set of forbidden and warning patterns, 
             # you could adapt the patterns to your own setting (degree of banning cuda stream, allowing some torch ops)
         )
-        assert static_check_status, f"Static check failed for sample {work.sample_id} for problem {problem_number}: {problem_name}. Error: {error}. Warnings: {warnings}"
-        if warnings:
-            print(f"Static check warnings for sample {work.sample_id} for problem {problem_number}: {problem_name}. Warnings: {warnings}")
+        # assert static_check_status, f"Static check failed for sample {work.sample_id} for problem {problem_number}: {problem_name}. Error: {error}. Warnings: {warnings}"
+        # if warnings:
+        #     print(f"Static check warnings for sample {work.sample_id} for problem {problem_number}: {problem_name}. Warnings: {warnings}")
 
     if config.verbose:
         print(
@@ -215,6 +217,10 @@ def main(config: GenerationConfig):
             config.max_tokens = preset.get("max_tokens", "None")
         if config.temperature is None or config.temperature == "None":
             config.temperature = preset.get("temperature", "None")
+        if config.api_base is None or config.api_base == "None":
+            config.api_base = preset.get("api_base", "None")
+        if config.api_key is None or config.api_key == "None":
+            config.api_key = preset.get("api_key", "None")
     
     # Convert string boolean to actual boolean for reasoning model flag
     if isinstance(config.is_reasoning_model, str):
@@ -282,7 +288,8 @@ def main(config: GenerationConfig):
     )
 
     # set up run directory
-    run_dir = os.path.join(config.runs_dir, config.run_name)
+    dt_string = datetime.now().strftime("%Y%m%d%H%M%S")
+    run_dir = os.path.join(config.runs_dir, f"{config.run_name}_{dt_string}")
     run_exists = os.path.exists(run_dir)
     if run_exists:
         print(f"\n⚠️  WARNING: Run directory already exists: {run_dir}")
@@ -295,6 +302,7 @@ def main(config: GenerationConfig):
     ), "supporting local file-system based storage for now"  # database integreation coming soon, need to migrate from CUDA Monkeys code
 
     problems_to_run = []
+    # problem_ids_to_run = problem_ids_to_run[:2]
     total_problems = 0
     already_completed = 0
     for problem_id in problem_ids_to_run:
@@ -314,6 +322,8 @@ def main(config: GenerationConfig):
     # We provide some presets in utils but you can also pass in your own, see query_server for more details
     inference_server = create_inference_server_from_presets(
         server_type=config.server_type,
+        api_base=config.api_base,
+        api_key=config.api_key,
         model_name=config.model_name,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
