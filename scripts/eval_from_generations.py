@@ -324,6 +324,7 @@ def evaluate_single_sample(
             device=device,
             backend=configs.backend,
             precision=eval.get_torch_dtype_from_string(configs.precision),
+            check_for_excessive_speedup=False
         )
         return eval_result
     except Exception as e:

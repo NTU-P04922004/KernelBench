@@ -533,15 +533,13 @@ def eval_kernel_against_ref(
             print(
                 f"[Eval] Lock file error during compilation, Please retry. Error: {e}"
             )
-            graceful_eval_cleanup(context, device, tempfile)
-            return None
-        else:
-            metadata["compilation_error_name"] = get_error_name(e)
-            metadata["compilation_error"] = e
-            graceful_eval_cleanup(context, device, tempfile)
-            return KernelExecResult(
-                compiled=False, metadata=metadata
-            )  # skip further steps
+
+        metadata["compilation_error_name"] = get_error_name(e)
+        metadata["compilation_error"] = e
+        graceful_eval_cleanup(context, device, tempfile)
+        return KernelExecResult(
+            compiled=False, metadata=metadata
+        )  # skip further steps
 
     # Check if ModelNew was successfully loaded (load_custom_model returns None on syntax errors)
     if ModelNew is None:

@@ -35,6 +35,10 @@ uv run python scripts/benchmark_eval_analysis.py run_name=<run_name> level=<leve
 class AnalysisConfig(Config):
     def __init__(self):
         self.run_name = REQUIRED  # name of the run to evaluate
+
+        self.dataset_src = REQUIRED  # either huggingface or local
+        self.dataset_name = "ScalingIntelligence/KernelBench"
+
         self.level = REQUIRED  # level to evaluate
 
         self.hardware = REQUIRED  # hardware to evaluate
@@ -67,7 +71,7 @@ def patch(eval_results, dataset):
     return eval_results
 
 
-def analyze_greedy_eval(run_name, hardware, baseline, level,
+def analyze_greedy_eval(run_name, hardware, baseline, dataset_src, dataset_name, level,
                         baseline_file=None, eval_results_dir=None) -> dict:
     """
     Analyze the greedy eval results for a run of a particular level.
@@ -75,7 +79,11 @@ def analyze_greedy_eval(run_name, hardware, baseline, level,
     Returns a dict with all computed metrics.
     """
 
-    dataset = construct_kernelbench_dataset(level)
+    dataset = construct_kernelbench_dataset(
+        level=level,
+        source=dataset_src,
+        dataset_name=dataset_name,
+    )
 
     # Resolve eval results path (use override if provided)
     if eval_results_dir:
@@ -178,6 +186,8 @@ def analyze_greedy_eval(run_name, hardware, baseline, level,
         # Get baseline result
         problem = dataset.get_problem_by_id(pid)
         problem_name = problem.name
+        # Fix for mini bench
+        problem_name += ".py"
         
         if problem_name not in baseline_results[f"level{level}"]:
             print(f"Warning: Problem {problem_name} not found in baseline results")
@@ -270,6 +280,8 @@ def main(config: AnalysisConfig):
         config.run_name,
         config.hardware,
         config.baseline,
+        config.dataset_src,
+        config.dataset_name,
         config.level,
         baseline_file=config.baseline_file,
         eval_results_dir=config.eval_results_dir

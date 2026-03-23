@@ -114,7 +114,7 @@ def query_server(
     if server_type == "local":
         # url = f"http://{server_address}:{server_port}"
         client = OpenAI(
-            api_key=api_key, base_url=api_base, timeout=None, max_retries=0
+            api_key=api_key, base_url=api_base, timeout=180, max_retries=1
         )
         # if isinstance(prompt, str):
         #     response = client.completions.create(
@@ -138,6 +138,7 @@ def query_server(
                 n=num_completions,
                 max_tokens=max_tokens,
                 top_p=top_p,
+                reasoning_effort=reasoning_effort,
             )
             outputs = [choice.message.content for choice in response.choices]
         
